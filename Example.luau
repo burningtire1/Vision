@@ -1,5 +1,4 @@
--- Replace OWNER and REPO. Use a public repository for this no-token loader.
-local BASE = "https://raw.githubusercontent.com/OWNER/REPO/main/"
+local BASE = "https://raw.githubusercontent.com/burningtire1/Vision/main/"
 local Vision = loadstring(game:HttpGet(BASE.."init.luau"))(BASE)
 local window = Vision.new({Title="Vision"})
 local tab = window:CreateTab({Name="Movement", Icon="wind"})
