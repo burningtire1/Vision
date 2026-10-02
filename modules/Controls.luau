@@ -7,7 +7,7 @@ local rgb, new, corner, padding, list, point, primary, copy, contains, encodeVal
 function Control:_callback(value)
     if self.Callback then
         local ok,err=pcall(self.Callback,copy(value),self)
-        if not ok then table.insert(self.Window.Errors,tostring(err)); warn("Lapse callback: "..tostring(err)) end
+        if not ok then table.insert(self.Window.Errors,tostring(err)); warn("Vision callback: "..tostring(err)) end
     end
 end
 
@@ -51,7 +51,7 @@ function Control:_render()
     self.Row:SetAttribute("Value",typeof(self.Value)=="Color3" and self.Value:ToHex() or type(self.Value)=="table" and table.concat(self.Value,", ") or self.Value)
     if self.Kind=="Toggle" then
         self.Switch.BackgroundColor3=self.Value and w.Theme.Accent or w.Theme.Raised
-        if self.Style=="Checkbox" then self.Tick.Visible=self.Value else self.Knob.Position=self.Value and UDim2.new(1,-17,0.5,-6) or UDim2.new(0,4,0.5,-6); self.Knob.BackgroundColor3=self.Value and Color3.new(1,1,1) or w.Theme.Muted end
+        if self.Style=="Checkbox" then self.Tick.Visible=self.Value else w:_tween(self.Knob,{Position=self.Value and UDim2.new(1,-17,0.5,-6) or UDim2.new(0,4,0.5,-6)},.12); self.Knob.BackgroundColor3=self.Value and Color3.new(1,1,1) or w.Theme.Muted end
     elseif self.Kind=="Slider" then
         self.Fill.Size=UDim2.fromScale((self.Value-self.Min)/(self.Max-self.Min),1)
         self.Fill.BackgroundColor3=w.Theme.Accent
@@ -143,7 +143,7 @@ function Section:AddButtons(options)
     for i,option in ipairs(buttons) do
         local button=w:_button(row,option.Name or "Button",UDim2.new(1/count,-((count-1)*5/count),1,0)); button.Position=UDim2.new((i-1)/count,(i-1)*5/count,0,0)
         if option.Primary then button:SetAttribute("BackgroundRole","Accent"); w:_paint(button,"BackgroundColor3","Accent") end
-        w:_connect(button.Activated,function() if option.Disabled then return end; if option.Callback then local ok,err=pcall(option.Callback); if not ok then table.insert(w.Errors,tostring(err)); warn("Lapse button: "..tostring(err)) end end end)
+        w:_connect(button.Activated,function() if option.Disabled then return end; if option.Callback then local ok,err=pcall(option.Callback); if not ok then table.insert(w.Errors,tostring(err)); warn("Vision button: "..tostring(err)) end end end)
         table.insert(results,button)
     end
     -- Reserve row order without adding nonconfigurable buttons to the registry.

@@ -64,3 +64,11 @@ Touch gestures were tested with simulated input, not on a physical phone.
 
 Lucide's license is included in assets/LUCIDE-LICENSE.txt. Keep it with the icons.
 Choose a license for your own library before allowing others to redistribute it.
+
+## Animation and repeat execution
+
+Animations are enabled by default. Pass `Animations=false` to `Vision.new` for instant transitions. Window opening, visibility, tab changes, popups, button hover and toggle knobs animate.
+
+Creating a window replaces and destroys the previous window with the same `Id` (default `VisionUI`), including its input connections and animations. Use distinct IDs to keep multiple windows. The registry uses `getgenv()` when available and `_G` otherwise. A stale same-name ScreenGui in the chosen parent is also removed. A GUI created by an older version can be removed, but its inaccessible Lua connections cannot be recovered by the new version.
+
+Config helpers: `window:ListConfigs()` returns sorted names without `.json`; `window:DeleteConfig(name)` returns false when missing. These require executor file APIs.

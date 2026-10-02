@@ -4,7 +4,39 @@ local Library, Window, Tab, Section, Control = ctx.Library, ctx.Window, ctx.Tab,
 local Players, UIS, TweenService, HttpService, RunService = ctx.Players, ctx.UIS, ctx.TweenService, ctx.HttpService, ctx.RunService
 local h = ctx.Helpers
 local rgb, new, corner, padding, list, point, primary, copy, contains, encodeValue, decodeValue = h.rgb, h.new, h.corner, h.padding, h.list, h.point, h.primary, h.copy, h.contains, h.encodeValue, h.decodeValue
+-- Shared across loader executions, not just windows created by one module instance.
+local environment=type(getgenv)=="function" and getgenv() or _G
+local registry=environment.__VisionWindows
+if type(registry)~="table" then registry={}; environment.__VisionWindows=registry end
+
+function Window:_pruneConnections()
+    for i=#self.Connections,1,-1 do
+        if not self.Connections[i].Connected then table.remove(self.Connections,i) end
+    end
+end
+
+function Window:_tween(obj,properties,duration)
+    if self.Dead or not obj.Parent then return end
+    self.Tweens=self.Tweens or {}
+    local existing=self.Tweens[obj]
+    if existing then existing:Cancel(); self.Tweens[obj]=nil end
+    if self.Animations==false then
+        for key,value in pairs(properties) do obj[key]=value end
+        return
+    end
+    local tween=TweenService:Create(obj,TweenInfo.new(duration or .16,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),properties)
+    self.Tweens[obj]=tween
+    local completed
+    completed=tween.Completed:Connect(function()
+        completed:Disconnect()
+        if self.Tweens[obj]==tween then self.Tweens[obj]=nil end
+    end)
+    tween:Play()
+    return tween
+end
+
 function Window:_connect(signal, fn)
+    self:_pruneConnections()
     local connection=signal:Connect(fn); table.insert(self.Connections,connection); return connection
 end
 
@@ -34,8 +66,8 @@ function Window:_button(parent,text,size)
     self:_paint(obj,"BackgroundColor3","Raised"); self:_paint(obj,"TextColor3","Text")
     corner(obj); self:_stroke(obj)
     obj:SetAttribute("BackgroundRole","Raised")
-    self:_connect(obj.MouseEnter,function() if not self.Dead and not obj:GetAttribute("NoHover") then obj.BackgroundColor3=self.Theme[obj:GetAttribute("BackgroundRole")]:Lerp(self.Theme.Text,0.045) end end)
-    self:_connect(obj.MouseLeave,function() if not self.Dead and not obj:GetAttribute("NoHover") then obj.BackgroundColor3=self.Theme[obj:GetAttribute("BackgroundRole")] end end)
+    self:_connect(obj.MouseEnter,function() if not self.Dead and not obj:GetAttribute("NoHover") then self:_tween(obj,{BackgroundColor3=self.Theme[obj:GetAttribute("BackgroundRole")]:Lerp(self.Theme.Text,0.045)},.12) end end)
+    self:_connect(obj.MouseLeave,function() if not self.Dead and not obj:GetAttribute("NoHover") then self:_tween(obj,{BackgroundColor3=self.Theme[obj:GetAttribute("BackgroundRole")]},.12) end end)
     return obj
 end
 
@@ -51,17 +83,17 @@ function Window:_icon(parent,name,position,size,token)
     self:_paint(obj,"ImageColor3",token or "Muted")
     if not asset then
         -- Honest fallback if executor has no custom asset API.
-        local glyph=({search="⌕",x="×",["chevron-down"]="⌄",["chevron-right"]="›",grip="⠿",check="✓",settings="⚙",crosshair="⊕",keyboard="⌨",eye="◉",swords="⚔",footprints="↗"})[name] or "•"
+        local glyph=({search="âŒ•",x="Ã—",["chevron-down"]="âŒ„",["chevron-right"]="â€º",grip="â ¿",check="âœ“",settings="âš™",crosshair="âŠ•",keyboard="âŒ¨",eye="â—‰",swords="âš”",footprints="â†—"})[name] or "â€¢"
         local fallback=self:_text(obj,glyph); fallback.TextXAlignment=Enum.TextXAlignment.Center
     end
     return obj
 end
 
-function Window:_drag(handle, fn)
+function Window:_drag(handle, fn, finish)
     self:_connect(handle.InputBegan,function(input)
         if not primary(input) then return end
-        local origin=point(input); local update,finish=fn(origin,input)
-        if update then self.Drag={input=input,update=update,finish=finish} end
+        local origin=point(input); local update,onFinish=fn(origin,input)
+        if update then self.Drag={input=input,update=update,finish=onFinish or finish} end
     end)
 end
 
@@ -74,6 +106,8 @@ function Window:_popup(name,size,anchor)
     local s=anchor and anchor.AbsoluteSize or Vector2.zero
     local vp=self.Gui.AbsoluteSize
     popup.Position=UDim2.fromOffset(math.clamp(p.X,8,math.max(8,vp.X-size.X.Offset-8)),math.clamp(p.Y+s.Y+4,8,math.max(8,vp.Y-size.Y.Offset-8)))
+    local scale=new("UIScale",{Scale=self.Animations==false and 1 or .96},popup)
+    self:_tween(scale,{Scale=1},.14)
     self.Popup=popup
     return popup
 end
@@ -81,6 +115,7 @@ end
 function Window:ClosePopup()
     if self.Popup then self.Popup:Destroy(); self.Popup=nil end
     if self.Shield then self.Shield.Visible=false end
+    self:_pruneConnections()
 end
 
 function Window:SetTheme(theme)
@@ -139,12 +174,18 @@ end
 
 function Library.new(options)
     options=options or {}
-    local self=setmetatable({Connections={},Paint={},Tabs={},Controls={},Order={},Keybinds={},RecentColors={},Icons={},Layout=options.Layout=="Mobile" and "Compact" or options.Layout or "Auto",DesiredSize=options.Size or Vector2.new(650,452),Theme=table.clone(Library.Themes.Vision),ThemeName="Vision",ConfigFolder=options.ConfigFolder or "LapseUI/configs",Dead=false,Errors={},ActiveTab=nil},Window)
+    local self=setmetatable({Connections={},Paint={},Tabs={},Controls={},Order={},Keybinds={},RecentColors={},Icons={},Layout=options.Layout=="Mobile" and "Compact" or options.Layout or "Auto",DesiredSize=options.Size or Vector2.new(650,452),Theme=table.clone(Library.Themes.Vision),ThemeName="Vision",ConfigFolder=options.ConfigFolder or "LapseUI/configs",Visible=true,Animations=options.Animations~=false,Id=options.Id or "VisionUI",Dead=false,Errors={},ActiveTab=nil},Window)
     ctx.Assets.Register(self)
     local parent=options.Parent
     if not parent then
         local ok,root=pcall(function() return type(gethui)=="function" and gethui() or Players.LocalPlayer:WaitForChild("PlayerGui") end)
         parent=ok and root or Players.LocalPlayer:WaitForChild("PlayerGui")
+    end
+    local previous=registry[self.Id]
+    if previous and previous~=self and type(previous.Destroy)=="function" then previous:Destroy() end
+    -- Clean up a stale GUI from an older library version too.
+    for _,child in ipairs(parent:GetChildren()) do
+        if child:IsA("ScreenGui") and child.Name==self.Id then child:Destroy() end
     end
     self.Gui=new("ScreenGui",{Name=options.Id or "VisionUI",IgnoreGuiInset=true,ResetOnSpawn=false,DisplayOrder=10000,ZIndexBehavior=Enum.ZIndexBehavior.Sibling},parent)
     self.Main=self:_frame(self.Gui,"Window",UDim2.fromOffset(650,452),"Background"); self.Main.Position=options.Position or UDim2.fromOffset(100,140); corner(self.Main,7); self:_stroke(self.Main)
@@ -164,7 +205,7 @@ function Library.new(options)
     self.Overlay=new("Frame",{Name="Overlay",BackgroundTransparency=1,Size=UDim2.fromScale(1,1),ZIndex=100},self.Gui)
     self.Shield=new("TextButton",{Name="Dismiss",BackgroundColor3=Color3.new(),BackgroundTransparency=1,Text="",AutoButtonColor=false,Size=UDim2.fromScale(1,1),Visible=false,ZIndex=101},self.Overlay)
     self.MobileToggle=self:_button(self.Gui,"Vision",UDim2.fromOffset(76,38)); self.MobileToggle.Name="MobileToggle"; self.MobileToggle.Position=UDim2.new(0,12,1,-50); self.MobileToggle.ZIndex=90
-    self:_connect(self.MobileToggle.Activated,function() self.Main.Visible=not self.Main.Visible; self:ClosePopup() end)
+    self:_connect(self.MobileToggle.Activated,function() self:SetVisible(not self.Visible) end)
     self:_connect(self.Shield.Activated,function() self:ClosePopup() end)
     self.Toasts=new("Frame",{Name="Notifications",BackgroundTransparency=1,Position=UDim2.new(1,-316,0,20),Size=UDim2.fromOffset(296,0),AutomaticSize=Enum.AutomaticSize.Y,ZIndex=200},self.Gui); list(self.Toasts,8)
     self.HUD=self:_frame(self.Gui,"KeybindHUD",UDim2.fromOffset(180,30),"Surface"); self.HUD.Position=UDim2.fromOffset(24,70); self.HUD.AutomaticSize=Enum.AutomaticSize.Y; self.HUD.Size=UDim2.fromOffset(180,0); corner(self.HUD); padding(self.HUD,7); list(self.HUD,5)
@@ -213,6 +254,10 @@ function Library.new(options)
     self:_connect(self.SearchButton.Activated,function() self:OpenSearch() end)
     self:_connect(self.Gui:GetPropertyChangedSignal("AbsoluteSize"),function() self:_layout() end)
     self:_layout(); if options.Theme then self:SetTheme(options.Theme) end
+    registry[self.Id]=self
+    self:_connect(self.Gui.Destroying,function() self:Destroy() end)
+    local scale=new("UIScale",{Name="VisibilityScale",Scale=self.Animations==false and 1 or .96},self.Main)
+    self:_tween(scale,{Scale=1},.2)
     return self
 end
 
@@ -237,15 +282,15 @@ function Window:SetVisible(visible)
         if not scale then scale=new("UIScale",{Name="VisibilityScale",Scale=1},root) end
         if visible and not root.Visible then scale.Scale=.96 end
         root.Visible=true
-        local tween=TweenService:Create(scale,TweenInfo.new(.16,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Scale=visible and 1 or .96})
-        table.insert(self.VisibilityTweens,tween); tween:Play()
+        local tween=self:_tween(scale,{Scale=visible and 1 or .96},.16)
+        if tween then table.insert(self.VisibilityTweens,tween) end
     end
-    task.delay(.16,function()
+    task.delay(self.Animations==false and 0 or .16,function()
         if self.Dead or self.VisibilityRevision~=revision then return end
         for _,root in ipairs(roots) do
             if root.Parent and (root==self.Main or root.Parent==self.Gui) then
                 root.Visible=visible
-                if not visible then root.VisibilityScale.Scale=1 end
+                if not visible then local scale=root:FindFirstChild("VisibilityScale"); if scale then scale.Scale=1 end end
             end
         end
     end)
@@ -255,6 +300,11 @@ end
 function Window:Destroy()
     if self.Dead then return end
     self.Dead=true; self.Drag=nil; self.Capturing=nil
+    if registry[self.Id]==self then registry[self.Id]=nil end
+    for _,tween in pairs(self.Tweens or {}) do tween:Cancel() end
+    table.clear(self.Tweens or {})
+    for _,tween in ipairs(self.VisibilityTweens or {}) do tween:Cancel() end
+    table.clear(self.VisibilityTweens or {})
     for _,connection in ipairs(self.Connections) do connection:Disconnect() end
     table.clear(self.Connections); self.Gui:Destroy()
 end

@@ -29,8 +29,10 @@ function Tab:_render()
 end
 
 function Tab:Select()
-    local w=self.Window; w.ActiveTab=self; w:ClosePopup()
+    local w=self.Window; if w.Dead or w.ActiveTab==self then return end; w.ActiveTab=self; w:ClosePopup()
     for _,tab in ipairs(w.Tabs) do tab.Page.Visible=tab==self; tab:_render() end
+    self.Page.Position=UDim2.fromOffset(0,w.Animations==false and 0 or 8)
+    w:_tween(self.Page,{Position=UDim2.fromOffset(0,0)},.18)
     local left=self.Button.AbsolutePosition.X-w.TabBar.AbsolutePosition.X+w.TabBar.CanvasPosition.X
     local x=w.TabBar.CanvasPosition.X; local viewport=w.TabBar.AbsoluteSize.X
     if left<x then w.TabBar.CanvasPosition=Vector2.new(left,0) elseif left+self.Button.AbsoluteSize.X>x+viewport then w.TabBar.CanvasPosition=Vector2.new(left+self.Button.AbsoluteSize.X-viewport,0) end
