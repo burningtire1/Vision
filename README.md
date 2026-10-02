@@ -72,3 +72,11 @@ Animations are enabled by default. Pass `Animations=false` to `Vision.new` for i
 Creating a window replaces and destroys the previous window with the same `Id` (default `VisionUI`), including its input connections and animations. Use distinct IDs to keep multiple windows. The registry uses `getgenv()` when available and `_G` otherwise. A stale same-name ScreenGui in the chosen parent is also removed. A GUI created by an older version can be removed, but its inaccessible Lua connections cannot be recovered by the new version.
 
 Config helpers: `window:ListConfigs()` returns sorted names without `.json`; `window:DeleteConfig(name)` returns false when missing. These require executor file APIs.
+
+## Reliability features
+
+Version 1.2.0 includes a config manager with Save, Load, Delete, Reset and Refresh. Call `window:CreateConfigManager({Autosave=false})` after adding your controls. Autosave is opt in, debounced and keeps a previous-save backup when the executor file APIs support it.
+
+Controls and sections support `:Destroy()`. Hold keybinds release when focus is lost or a bind is changed, disabled or removed. Explicit tab, section and control IDs preserve config identity across display-name changes. Textbox limits count Unicode code points and slider inputs are checked before rows are created.
+
+See docs/API.md for options, backup behavior and examples. Runtime tests were performed through a connected Roblox client with synthetic touch input. Physical handset testing and screenshot-based visual approval are not claimed.

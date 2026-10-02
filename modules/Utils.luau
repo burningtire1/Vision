@@ -25,4 +25,16 @@ local function decodeValue(v)
     return v
 end
 
-return {rgb=rgb,new=new,corner=corner,padding=padding,list=list,point=point,primary=primary,copy=copy,contains=contains,encodeValue=encodeValue,decodeValue=decodeValue}
+local function finite(v)
+    return type(v)=="number" and v==v and math.abs(v)<math.huge
+end
+local function truncate(text,length)
+    assert(type(text)=="string" and utf8.len(text)~=nil,"Text must be valid UTF-8")
+    if utf8.len(text)<=length then return text end
+    local at=utf8.offset(text,length+1)
+    return at and text:sub(1,at-1) or text
+end
+local function removeValue(array,value)
+    local at=table.find(array,value); if at then table.remove(array,at) end
+end
+return {finite=finite,truncate=truncate,removeValue=removeValue,rgb=rgb,new=new,corner=corner,padding=padding,list=list,point=point,primary=primary,copy=copy,contains=contains,encodeValue=encodeValue,decodeValue=decodeValue}

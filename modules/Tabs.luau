@@ -7,7 +7,10 @@ local rgb, new, corner, padding, list, point, primary, copy, contains, encodeVal
 function Window:CreateTab(options)
     if type(options)=="string" then options={Name=options} end
     options=options or {}
-    local tab=setmetatable({Window=self,Name=options.Name or "Tab",Sections={}},Tab)
+    local id=options.Id or options.Name or "Tab"
+    assert(type(id)=="string" and #id>0,"Tab Id must be a nonempty string")
+    for _,existing in ipairs(self.Tabs) do assert(existing.Id~=id,"Duplicate tab Id: "..id) end
+    local tab=setmetatable({Id=id,Window=self,Name=options.Name or "Tab",Sections={}},Tab)
     tab.Button=self:_button(self.TabBar,"",UDim2.fromOffset(math.max(80,#tab.Name*7+35),28)); tab.Button.Name="Tab_"..tab.Name; tab.Button.LayoutOrder=#self.Tabs+1
     tab.Icon=self:_icon(tab.Button,options.Icon or "crosshair",UDim2.fromOffset(8,6),16)
     tab.Caption=self:_text(tab.Button,tab.Name,UDim2.new(1,-31,1,0),true); tab.Caption.Position=UDim2.fromOffset(30,0)

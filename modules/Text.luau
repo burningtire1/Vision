@@ -9,7 +9,11 @@ function Section:AddLabel(text)
 end
 
 function Section:AddTextbox(options)
-    options=options or {}; local c=self:_control("Textbox",options,68); local w=self.Window
+    options=options or {}
+    local maxLength=options.MaxLength or 256
+    assert(h.finite(maxLength) and maxLength>=1 and maxLength%1==0,"MaxLength must be a positive integer")
+    assert(options.Default==nil or type(options.Default)=="string" and utf8.len(options.Default)~=nil,"Textbox default must be valid UTF-8")
+    local c=self:_control("Textbox",options,68); local w=self.Window
     c.MaxLength=options.MaxLength or 256; assert(c.MaxLength>=1,"MaxLength must be positive")
     c.Input=w:_input(c.Row,"",UDim2.new(1,0,0,36)); c.Input.Name="TextInput"; c.Input.Position=UDim2.fromOffset(0,26); c.Input.PlaceholderText=options.Placeholder or "Type here..."; c.Input.MultiLine=options.MultiLine==true
     c.Input.TextEditable=not c.Disabled

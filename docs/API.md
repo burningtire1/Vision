@@ -143,3 +143,52 @@ Without executor asset APIs, icons fall back to text symbols.
 
 ## Sub tabs
 Dragged out sections are called sub tabs. Right Shift hides or shows the main window and its sub tabs with a short animation. Their positions stay saved. Use `window:SetVisible(false)` to hide or `window:SetVisible(true)` to show. Existing `section:Detach()` and `section:Dock()` calls still work.
+
+## Config manager and autosave
+
+```lua
+local manager = window:CreateConfigManager({
+    Id = "settings", Autosave = false,
+    AutosaveName = "Auto", Debounce = 1,
+})
+-- To put the manager into an existing tab, also pass Tab = settingsTab.
+window:ConfigureAutosave({Name="Auto", Debounce=1, Enabled=true})
+window:ConfigureAutosave({Enabled=false})
+manager:Refresh("Default")
+window:ResetConfig() -- reset defaults silently, including layout and geometry
+```
+
+Autosave is opt in. Changed configurable control values, colors, themes, layouts and completed drags schedule one debounced save. Config import does not schedule autosave. Errors are recorded in `window.Errors` and `window.LastAutosaveError`. A previous structurally valid save is stored as `NAME.backup.json` when file APIs support it. LoadConfig falls back to that backup when the primary cannot be imported and returns `true, "backup"`. ListConfigs hides backups. DeleteConfig deletes both copies. There is no promise of atomic disk writes if an executor crashes during writefile.
+
+The manager provides Save, Load, Delete, Reset, Refresh and an Autosave toggle. Its controls use `IgnoreConfig=true` and do not serialize themselves. You can use this option on your own transient controls too.
+
+## Stable identities
+
+```lua
+local tab = window:CreateTab({Id="movement", Name="Movement"})
+local section = tab:CreateSection({Id="movementSettings", Name="Settings"})
+local toggle = section:AddToggle({Id="enabled", Name="Enabled", Default=false})
+```
+
+Tab IDs must be unique in a window. Section IDs must be unique across its tabs. Explicit IDs keep configs working when display names change. Default section IDs use the tab Id and section name; duplicates within a tab are rejected. Provide explicit IDs for same-name sections. Controls derive IDs from their stable section ID unless you provide an explicit Id. Version 1 configs without section IDs still load when names match uniquely; ambiguous legacy records are rejected.
+
+## Removing controls and sections
+
+```lua
+toggle:Destroy()
+section:Destroy()
+```
+
+Both are idempotent. Attached keybinds, HUD entries, config registry entries, search entries and destroyed GUI connections are removed. Destroying an open dropdown/colorpicker owner or a control while search is open closes that popup. Detached section roots are also removed. Do not use a destroyed object again.
+
+Hold keybinds release on focus loss, text input focus, rebind, disable, target disable, destruction and window replacement. Repeated key-down events do not repeatedly invoke an already active hold bind.
+
+Textbox MaxLength counts UTF-8 code points, not bytes or grapheme clusters. Invalid UTF-8 and fractional lengths are rejected. Slider bounds, step and defaults must be finite; invalid inputs are rejected before creating a row or registering its Id.
+
+## Dynamic dropdown options
+
+`dropdown:SetOptions(options, default)` validates the entire replacement before changing state. Options must be a nonempty dense array of unique strings. Invalid options or selections leave Options, Value and DefaultValue unchanged.
+
+A successful call also updates the reset default to its normalized selection. When default is omitted, single dropdowns select the first option and multi dropdowns select an empty array. Multi defaults are copied and deduplicated; aliases are resolved for single dropdown defaults.
+
+Slider readouts use up to 15 significant digits rather than a decimal-place guess based on Step. Fractional steps, fractional lower bounds and suffixes are preserved; very small or large values may use scientific notation.

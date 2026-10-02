@@ -9,6 +9,11 @@ local environment=type(getgenv)=="function" and getgenv() or _G
 local registry=environment.__VisionWindows
 if type(registry)~="table" then registry={}; environment.__VisionWindows=registry end
 
+function Window:_prunePaint()
+    for i=#self.Paint,1,-1 do if not self.Paint[i][1].Parent then table.remove(self.Paint,i) end end
+    for obj,tween in pairs(self.Tweens or {}) do if not obj.Parent then tween:Cancel(); self.Tweens[obj]=nil end end
+end
+
 function Window:_pruneConnections()
     for i=#self.Connections,1,-1 do
         if not self.Connections[i].Connected then table.remove(self.Connections,i) end
@@ -93,7 +98,7 @@ function Window:_drag(handle, fn, finish)
     self:_connect(handle.InputBegan,function(input)
         if not primary(input) then return end
         local origin=point(input); local update,onFinish=fn(origin,input)
-        if update then self.Drag={input=input,update=update,finish=onFinish or finish} end
+        if update then self.Drag={handle=handle,input=input,update=update,finish=onFinish or finish} end
     end)
 end
 
@@ -115,7 +120,7 @@ end
 function Window:ClosePopup()
     if self.Popup then self.Popup:Destroy(); self.Popup=nil end
     if self.Shield then self.Shield.Visible=false end
-    self:_pruneConnections()
+    self.PopupOwner=nil; self:_pruneConnections(); self:_prunePaint()
 end
 
 function Window:SetTheme(theme)
@@ -134,12 +139,14 @@ function Window:SetTheme(theme)
     for _,control in pairs(self.Controls) do control:_render() end
     for _,tab in ipairs(self.Tabs) do tab:_render() end
     self:UpdateHUD()
+    if self._configChanged then self:_configChanged() end
 end
 
 function Window:SetLayout(mode)
     if mode=="Mobile" then mode="Compact" end
     assert(mode=="Auto" or mode=="Desktop" or mode=="Compact","Layout must be Auto, Desktop, Compact or Mobile")
     self.Layout=mode; self:_layout()
+    if self._configChanged then self:_configChanged() end
 end
 
 function Window:_layout()
@@ -217,19 +224,21 @@ function Library.new(options)
             return function(p) local d=p-origin; frame.Position=UDim2.fromOffset(start.X.Offset+d.X,start.Y.Offset+d.Y); self:_clamp(frame) end
         end
     end
-    self:_drag(header,move(self.Main)); self:_drag(hudHeader,move(self.HUD))
+    self:_drag(header,move(self.Main),function() if self._configChanged then self:_configChanged() end end); self:_drag(hudHeader,move(self.HUD))
     self:_drag(self.Resize,function(origin)
         local start=self.Main.AbsoluteSize
         return function(p) local d=p-origin; self.DesiredSize=Vector2.new(math.max(280,start.X+d.X),math.max(240,start.Y+d.Y)); self:_layout() end
-    end)
+    end,function() if self._configChanged then self:_configChanged() end end)
     self:_connect(UIS.InputChanged,function(input)
         local drag=self.Drag
         if drag and (input==drag.input or (drag.input.UserInputType==Enum.UserInputType.MouseButton1 and input.UserInputType==Enum.UserInputType.MouseMovement)) then drag.update(point(input)) end
     end)
     self:_connect(UIS.InputEnded,function(input)
-        if self.Drag and input==self.Drag.input then local drag=self.Drag; self.Drag=nil; if drag.finish then drag.finish(point(input)) end end
-        for _,bind in ipairs(self.Keybinds) do if bind.Mode=="Hold" and bind.Value==input.KeyCode.Name and bind.Active then bind.Active=false; if bind.Target then bind.Target:Set(false) end; bind:_callback(false); self:UpdateHUD() end end
+        if self.Drag and input==self.Drag.input then local drag=self.Drag; self.Drag=nil; if drag.finish then drag.finish(point(input)) end; if self._configChanged then self:_configChanged() end end
+        for _,bind in ipairs(self.Keybinds) do if bind.Mode=="Hold" and bind.Value==input.KeyCode.Name and bind.Active then bind:_releaseHold() end end
     end)
+    self:_connect(UIS.WindowFocusReleased,function() self.Drag=nil; self.Capturing=nil; self:_releaseHolds() end)
+    self:_connect(UIS.TextBoxFocused,function() self:_releaseHolds() end)
     self:_connect(UIS.InputBegan,function(input,processed)
         if input.UserInputType~=Enum.UserInputType.Keyboard then return end
         if self.Capturing then
@@ -244,7 +253,8 @@ function Library.new(options)
         if input.KeyCode==Enum.KeyCode.Escape then self:ClosePopup() end
         if input.KeyCode==Enum.KeyCode.F and (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) then self:OpenSearch() end
         for _,bind in ipairs(self.Keybinds) do
-            if not bind.Disabled and bind.Value==input.KeyCode.Name then
+            if not bind.Disabled and not (bind.Target and bind.Target.Disabled) and bind.Value==input.KeyCode.Name then
+                if bind.Mode=="Hold" and bind.Active then continue end
                 if bind.Mode=="Hold" then bind.Active=true else bind.Active=not bind.Active end
                 if bind.Target then bind.Target:Set(bind.Active) end
                 bind:_callback(bind.Active); self:UpdateHUD()
@@ -254,6 +264,7 @@ function Library.new(options)
     self:_connect(self.SearchButton.Activated,function() self:OpenSearch() end)
     self:_connect(self.Gui:GetPropertyChangedSignal("AbsoluteSize"),function() self:_layout() end)
     self:_layout(); if options.Theme then self:SetTheme(options.Theme) end
+    self.InitialState={theme=table.clone(self.Theme),themeName=self.ThemeName,layout=self.Layout,size=self.DesiredSize,position=self.Main.Position}
     registry[self.Id]=self
     self:_connect(self.Gui.Destroying,function() self:Destroy() end)
     local scale=new("UIScale",{Name="VisibilityScale",Scale=self.Animations==false and 1 or .96},self.Main)
@@ -299,7 +310,8 @@ end
 
 function Window:Destroy()
     if self.Dead then return end
-    self.Dead=true; self.Drag=nil; self.Capturing=nil
+    self:_releaseHolds()
+    self.Dead=true; self.AutosaveRevision=(self.AutosaveRevision or 0)+1; self.Drag=nil; self.Capturing=nil
     if registry[self.Id]==self then registry[self.Id]=nil end
     for _,tween in pairs(self.Tweens or {}) do tween:Cancel() end
     table.clear(self.Tweens or {})

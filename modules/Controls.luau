@@ -14,6 +14,7 @@ end
 function Control:Get() return copy(self.Value) end
 
 function Control:Set(value,silent)
+    assert(not self.Dead and not self.Window.Dead,"Control destroyed")
     if self.Kind=="Toggle" then assert(type(value)=="boolean","Toggle expects boolean")
     elseif self.Kind=="Slider" then
         assert(type(value)=="number" and value==value and math.abs(value)<math.huge,"Slider expects finite number")
@@ -22,15 +23,21 @@ function Control:Set(value,silent)
         if not self.Multi and self.Aliases[value] then value=self.Aliases[value] end
         if self.Multi then assert(type(value)=="table","Multi dropdown expects array"); local selected={}; for _,option in ipairs(value) do assert(contains(self.Options,option),"Unknown option"); if not contains(selected,option) then table.insert(selected,option) end end; value=selected
         else assert(contains(self.Options,value),"Unknown dropdown option") end
-    elseif self.Kind=="Keybind" then assert(type(value)=="string" and (value=="None" or Enum.KeyCode[value]~=nil),"Unknown KeyCode")
+    elseif self.Kind=="Keybind" then assert(type(value)=="string" and (value=="None" or Enum.KeyCode[value]~=nil),"Unknown KeyCode"); if value~=self.Value then self:_releaseHold() end
     elseif self.Kind=="Colorpicker" then assert(typeof(value)=="Color3","Colorpicker expects Color3")
-    elseif self.Kind=="Textbox" then assert(type(value)=="string","Textbox expects string"); value=value:sub(1,self.MaxLength) end
-    self.Value=copy(value); self:_render()
+    elseif self.Kind=="Textbox" then assert(type(value)=="string","Textbox expects string"); value=h.truncate(value,self.MaxLength) end
+    local initial=not self.Initialized
+    self.Value=copy(value); if initial then self.DefaultValue=copy(value); self.Initialized=true end; self:_render()
     if self.Kind=="Toggle" then for _,bind in ipairs(self.Window.Keybinds) do if bind.Target==self then bind.Active=value end end end
-    self.Window:UpdateHUD(); if not silent and self.Kind~="Keybind" then self:_callback(value) end
+    self.Window:UpdateHUD(); if not initial and not self.IgnoreConfig and self.Window._configChanged then self.Window:_configChanged() end; if not silent and self.Kind~="Keybind" then self:_callback(value) end
 end
 
 function Control:SetDisabled(disabled)
+    if disabled==true then
+        if self.Kind=="Keybind" then self:_releaseHold() end
+        if self.Kind=="Toggle" then for _,bind in ipairs(self.Window.Keybinds) do if bind.Target==self then bind:_releaseHold() end end end
+        if self.Window.Capturing==self then self.Window.Capturing=nil end
+    end
     self.Disabled=disabled==true; self.Row:SetAttribute("Disabled",self.Disabled)
     self.Row.GroupTransparency=self.Disabled and 0.55 or 0
     if self.Input then self.Input.TextEditable=not self.Disabled end
@@ -56,8 +63,8 @@ function Control:_render()
         self.Fill.Size=UDim2.fromScale((self.Value-self.Min)/(self.Max-self.Min),1)
         self.Fill.BackgroundColor3=w.Theme.Accent
         self.Thumb.Position=UDim2.new((self.Value-self.Min)/(self.Max-self.Min),-5,0.5,-5)
-        local decimals=math.max(0,math.ceil(-math.log10(self.Step)))
-        self.Readout.Text=string.format("%."..math.min(4,decimals).."f",self.Value)..(self.Suffix or "")
+        -- Significant digits retain fractional steps and fractional lower bounds.
+        self.Readout.Text=string.format("%.15g",self.Value)..(self.Suffix or "")
     elseif self.Kind=="Dropdown" then
         self.Caption.Text=self.Multi and (#self.Value>0 and table.concat(self.Value,", ") or "None") or self.Value
     elseif self.Kind=="Keybind" then self.Key.Text=self.Value=="None" and "..." or self.Value
@@ -82,7 +89,11 @@ function Section:AddToggle(options)
 end
 
 function Section:AddSlider(options)
-    options=options or {}; local c=self:_control("Slider",options,42); local w=self.Window
+    options=options or {}
+    local minimum=options.Min or 0; local maximum=options.Max or 100; local step=options.Step or 1
+    assert(h.finite(minimum) and h.finite(maximum) and h.finite(step) and maximum>minimum and step>0 and h.finite(maximum-minimum) and h.finite((maximum-minimum)/step),"Slider requires finite Max > Min and Step > 0")
+    assert(options.Default==nil or h.finite(options.Default),"Slider default must be finite")
+    local c=self:_control("Slider",options,42); local w=self.Window
     c.Min=options.Min or 0; c.Max=options.Max or 100; c.Step=options.Step or 1; c.Suffix=options.Suffix or ""
     assert(c.Max>c.Min and c.Step>0,"Slider requires Max > Min and Step > 0")
     c.Readout=w:_text(c.Row,"",UDim2.new(0.45,0,0,22),true); c.Readout.Position=UDim2.fromScale(0.55,0); c.Readout.TextXAlignment=Enum.TextXAlignment.Right; c.Readout.TextSize=12
@@ -110,8 +121,40 @@ function Section:AddDropdown(options)
 end
 
 function Control:SetOptions(options,default)
-    assert(self.Kind=="Dropdown" and #options>0,"Expected nonempty dropdown options")
-    self.Options=table.clone(options); self:Set(default or (self.Multi and {} or self.Options[1])); self.Window:ClosePopup()
+    assert(self.Kind=="Dropdown" and not self.Dead and not self.Window.Dead,"Expected a live dropdown")
+    -- Resolve the complete replacement before touching options, value or reset default.
+    assert(type(options)=="table","Expected nonempty dropdown options")
+    local count=0
+    for key in pairs(options) do assert(type(key)=="number" and key>=1 and key%1==0,"Options must be a dense array"); count+=1 end
+    assert(count>0 and count==#options,"Expected nonempty dense dropdown options")
+    local replacement={}
+    for i=1,count do
+        local option=options[i]
+        assert(type(option)=="string" and not contains(replacement,option),"Options must be unique strings")
+        replacement[i]=option
+    end
+    local value=default
+    if value==nil then value=self.Multi and {} or replacement[1] end
+    if self.Multi then
+        assert(type(value)=="table","Multi dropdown expects array")
+        local selectedCount=0
+        for key in pairs(value) do assert(type(key)=="number" and key>=1 and key%1==0,"Selection must be a dense array"); selectedCount+=1 end
+        assert(selectedCount==#value,"Selection must be a dense array")
+        local selected={}
+        for i=1,selectedCount do
+            local option=value[i]; assert(contains(replacement,option),"Unknown option")
+            if not contains(selected,option) then table.insert(selected,option) end
+        end
+        value=selected
+    else
+        local alias=(self.Aliases or {})[value]
+        if alias then value=alias end
+        assert(contains(replacement,value),"Unknown dropdown option")
+    end
+    self.Options=replacement
+    self.DefaultValue=copy(value)
+    self:Set(value)
+    self.Window:ClosePopup()
 end
 
 function Control:Open()
@@ -120,6 +163,7 @@ function Control:Open()
     assert(self.Kind=="Dropdown","Open requires dropdown or colorpicker")
     local w=self.Window; local width=math.max(190,self.Button.AbsoluteSize.X)
     local popup=w:_popup("DropdownPopup",UDim2.fromOffset(width,math.min(224,#self.Options*28+12)),self.Button)
+    w.PopupOwner=self
     local scroll=new("ScrollingFrame",{Name="Options",BackgroundTransparency=1,BorderSizePixel=0,Size=UDim2.fromScale(1,1),CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=3},popup); padding(scroll,6); list(scroll,2); w:_paint(scroll,"ScrollBarImageColor3","Accent")
     for i,option in ipairs(self.Options) do
         local selected=self.Multi and contains(self.Value,option) or self.Value==option
@@ -142,6 +186,7 @@ function Section:AddButtons(options)
     local results={}
     for i,option in ipairs(buttons) do
         local button=w:_button(row,option.Name or "Button",UDim2.new(1/count,-((count-1)*5/count),1,0)); button.Position=UDim2.new((i-1)/count,(i-1)*5/count,0,0)
+        button.Name=option.Name or "Button"
         if option.Primary then button:SetAttribute("BackgroundRole","Accent"); w:_paint(button,"BackgroundColor3","Accent") end
         w:_connect(button.Activated,function() if option.Disabled then return end; if option.Callback then local ok,err=pcall(option.Callback); if not ok then table.insert(w.Errors,tostring(err)); warn("Vision button: "..tostring(err)) end end end)
         table.insert(results,button)
@@ -152,6 +197,25 @@ function Section:AddButtons(options)
 end
 
 function Section:AddButton(options) return self:AddButtons({options})[1] end
+
+function Control:Destroy()
+    if self.Dead then return end
+    if self.Kind=="Keybind" then self:_releaseHold() end
+    if self.Kind=="Toggle" then
+        for _,bind in ipairs(table.clone(self.Window.Keybinds)) do if bind.Target==self then bind:Destroy() end end
+    end
+    self.Dead=true
+    local w=self.Window
+    if w.Capturing==self then w.Capturing=nil end
+    if w.PopupOwner==self or w.Popup and w.Popup.Name=="SearchPopup" then w:ClosePopup() end
+    if w.Drag and w.Drag.handle:IsDescendantOf(self.Row) then w.Drag=nil end
+    w.Controls[self.Id]=nil
+    h.removeValue(w.Order,self); h.removeValue(w.Keybinds,self); h.removeValue(self.Section.Controls,self)
+    if self.Key and not self.Key:IsDescendantOf(self.Row) then self.Key:Destroy() end
+    if self.HUDRow then self.HUDRow:Destroy() end
+    self.Row:Destroy(); w:_pruneConnections(); w:_prunePaint(); w:UpdateHUD()
+    if w._configChanged then w:_configChanged() end
+end
 
 return true
 end

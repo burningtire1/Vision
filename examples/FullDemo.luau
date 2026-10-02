@@ -83,4 +83,5 @@ icons:AddParagraph({Title="More Lucide icons",Text="49 icons are bundled locally
 for _,name in ipairs({"shield","touchpad","file-text","panel-top","info","hand"}) do local label=icons:AddLabel("      "..name); window:_icon(label,name,UDim2.fromOffset(1,4),16,"Accent") end
 env.LapseLibrary=Library
 env.VisionLibrary=Library
+window:CreateConfigManager({Id="settings",Autosave=false})
 window:Notify({Title="Vision",Text="UI ready",Duration=3})

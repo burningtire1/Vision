@@ -5,8 +5,10 @@ local Players, UIS, TweenService, HttpService, RunService = ctx.Players, ctx.UIS
 local h = ctx.Helpers
 local rgb, new, corner, padding, list, point, primary, copy, contains, encodeValue, decodeValue = h.rgb, h.new, h.corner, h.padding, h.list, h.point, h.primary, h.copy, h.contains, h.encodeValue, h.decodeValue
 function Section:AddColorpicker(options)
-    options=options or {}; local c=self:_control("Colorpicker",options,24); local w=self.Window
-    c.Alpha=options.Alpha or 1; c.Swatches=table.clone(options.Swatches or {rgb(86,127,214),rgb(145,120,255),rgb(255,79,94),rgb(61,203,185),rgb(155,239,30)})
+    options=options or {}
+    assert(options.Alpha==nil or h.finite(options.Alpha) and options.Alpha>=0 and options.Alpha<=1,"Alpha must be between 0 and 1")
+    local c=self:_control("Colorpicker",options,24); local w=self.Window
+    c.Alpha=options.Alpha or 1; c.DefaultAlpha=c.Alpha; c.Swatches=table.clone(options.Swatches or {rgb(86,127,214),rgb(145,120,255),rgb(255,79,94),rgb(61,203,185),rgb(155,239,30)})
     c.Swatch=w:_button(c.Row,"",UDim2.fromOffset(24,18)); c.Swatch.Position=UDim2.new(1,-24,0,3)
     c.Swatch:SetAttribute("NoHover",true)
     w:_connect(c.Swatch.Activated,function() if not c.Disabled then c:Open() end end)
@@ -16,6 +18,7 @@ end
 function Control:SetAlpha(alpha,silent)
     assert(self.Kind=="Colorpicker" and type(alpha)=="number" and alpha==alpha and math.abs(alpha)<math.huge,"Expected finite alpha")
     self.Alpha=math.clamp(alpha,0,1)
+    if not self.IgnoreConfig and self.Window._configChanged then self.Window:_configChanged() end
     if not silent then self:_callback(self.Value) end
 end
 
@@ -26,6 +29,7 @@ end
 
 function Window:_openColor(c)
     local popup=self:_popup("ColorpickerPopup",UDim2.fromOffset(248,318),c.Swatch)
+    self.PopupOwner=c
     local h,s,v=c.Value:ToHSV()
     local title=self:_text(popup,c.Name,UDim2.new(1,-38,0,28)); title.Position=UDim2.fromOffset(10,0)
     local close=self:_button(popup,"",UDim2.fromOffset(20,20)); close.Position=UDim2.new(1,-26,0,4); self:_icon(close,"x",UDim2.fromOffset(3,3),14); self:_connect(close.Activated,function() self:_rememberColor(c.Value); self:ClosePopup() end)

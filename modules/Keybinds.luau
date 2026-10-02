@@ -4,6 +4,17 @@ local Library, Window, Tab, Section, Control = ctx.Library, ctx.Window, ctx.Tab,
 local Players, UIS, TweenService, HttpService, RunService = ctx.Players, ctx.UIS, ctx.TweenService, ctx.HttpService, ctx.RunService
 local h = ctx.Helpers
 local rgb, new, corner, padding, list, point, primary, copy, contains, encodeValue, decodeValue = h.rgb, h.new, h.corner, h.padding, h.list, h.point, h.primary, h.copy, h.contains, h.encodeValue, h.decodeValue
+function Control:_releaseHold()
+    if self.Mode~="Hold" or not self.Active or self.Releasing then return end
+    self.Releasing=true; self.Active=false
+    if self.Target and not self.Target.Dead and not self.Window.Dead then self.Target:Set(false) end
+    self:_callback(false); self.Window:UpdateHUD(); self.Releasing=false
+end
+
+function Window:_releaseHolds()
+    for _,bind in ipairs(table.clone(self.Keybinds)) do bind:_releaseHold() end
+end
+
 function Control:Bind(options)
     assert(self.Kind=="Toggle","Bind requires a toggle")
     options=table.clone(options or {}); options.Name=options.Name or self.Name; options.Id=options.Id or (self.Id.."/keybind"); options.Target=self
