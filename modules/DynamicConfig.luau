@@ -101,213 +101,7 @@ local function JsonEncode(Value, Compact)
     return table.concat(Buffer)
 end
 
-local function JsonDecode(Text)
-    Text = tostring(Text)
-    local Length = #Text
-    local Position = 1
-
-    local function SkipWhitespace()
-        while Position <= Length do
-            local Char = Text:byte(Position)
-            if Char == 32 or Char == 9 or Char == 10 or Char == 13 then
-                Position = Position + 1
-            else
-                return
-            end
-        end
-    end
-
-    local function ParseString(Start)
-        local Chunks = {}
-        local ChunkCount = 0
-        Position = Start + 1
-
-        while Position <= Length do
-            local ChunkStart = Position
-            local NextPos = Text:find('["\\]', Position)
-
-            if not NextPos then
-                return nil
-            end
-
-            if Text:byte(NextPos) == 34 then -- closing "
-                if NextPos > ChunkStart then
-                    ChunkCount = ChunkCount + 1
-                    Chunks[ChunkCount] = Text:sub(ChunkStart, NextPos - 1)
-                end
-                Position = NextPos + 1
-                return table.concat(Chunks)
-            end
-
-            -- escape sequence at NextPos
-            if NextPos > ChunkStart then
-                ChunkCount = ChunkCount + 1
-                Chunks[ChunkCount] = Text:sub(ChunkStart, NextPos - 1)
-            end
-
-            local EscChar = Text:byte(NextPos + 1)
-            local Escaped = EscChar and ({
-                [34] = '"',
-                [47] = "/",
-                [92] = "\\",
-                [98] = "\b",
-                [102] = "\f",
-                [110] = "\n",
-                [114] = "\r",
-                [116] = "\t",
-            })[EscChar]
-
-            if Escaped then
-                ChunkCount = ChunkCount + 1
-                Chunks[ChunkCount] = Escaped
-                Position = NextPos + 2
-            elseif EscChar == 117 then -- 'u'
-                local Code = tonumber(Text:sub(NextPos + 2, NextPos + 5), 16)
-                Position = NextPos + 6
-
-                if Code and Code >= 0xD800 and Code <= 0xDBFF then
-                    if Text:sub(NextPos + 6, NextPos + 7) == "\\u" then
-                        local Low = tonumber(Text:sub(NextPos + 8, NextPos + 11), 16)
-                        if Low and Low >= 0xDC00 and Low <= 0xDFFF then
-                            Code = 0x10000 + (Code - 0xD800) * 0x400 + (Low - 0xDC00)
-                            Position = NextPos + 12
-                        end
-                    end
-                end
-
-                if Code then
-                    local Ok, Char8 = pcall(utf8.char, Code)
-                    if Ok then
-                        ChunkCount = ChunkCount + 1
-                        Chunks[ChunkCount] = Char8
-                    end
-                end
-            else
-                return nil
-            end
-        end
-
-        return nil
-    end
-
-    local function ParseValue()
-        SkipWhitespace()
-        if Position > Length then
-            return nil, false
-        end
-
-        local Char = Text:byte(Position)
-
-        if Char == 34 then -- "
-            local String = ParseString(Position)
-            if String == nil then
-                return nil, false
-            end
-            return String, true
-        end
-
-        if Char == 123 or Char == 91 then -- { or [
-            local IsObject = Char == 123
-            local Result = {}
-            local Count = 0
-            Position = Position + 1
-            SkipWhitespace()
-
-            if Text:byte(Position) == (IsObject and 125 or 93) then -- } or ]
-                Position = Position + 1
-                return Result, true
-            end
-
-            while true do
-                if IsObject then
-                    SkipWhitespace()
-                    local Key = ParseString(Position)
-                    if Key == nil then
-                        return nil, false
-                    end
-                    SkipWhitespace()
-                    if Text:byte(Position) ~= 58 then -- :
-                        return nil, false
-                    end
-                    Position = Position + 1
-
-                    local Item, ItemOk = ParseValue()
-                    if not ItemOk then
-                        return nil, false
-                    end
-                    Result[Key] = Item
-                else
-                    local Item, ItemOk = ParseValue()
-                    if not ItemOk then
-                        return nil, false
-                    end
-                    Count = Count + 1
-                    Result[Count] = Item
-                end
-
-                SkipWhitespace()
-                local NextByte = Text:byte(Position)
-                if NextByte == 44 then -- ,
-                    Position = Position + 1
-                elseif NextByte == (IsObject and 125 or 93) then
-                    Position = Position + 1
-                    return Result, true
-                else
-                    return nil, false
-                end
-            end
-        end
-
-        if Char == 45 or (Char >= 48 and Char <= 57) then -- number
-            local Start = Position
-            Position = Position + 1
-
-            while Position <= Length do
-                local Byte = Text:byte(Position)
-                if (Byte >= 48 and Byte <= 57) or Byte == 45 or Byte == 43 or Byte == 46 or Byte == 101 or Byte == 69 then
-                    Position = Position + 1
-                else
-                    break
-                end
-            end
-
-            local Number = tonumber(Text:sub(Start, Position - 1))
-            if Number == nil then
-                return nil, false
-            end
-            return Number, true
-        end
-
-        if Char == 116 then -- true
-            if Text:sub(Position, Position + 3) == "true" then
-                Position = Position + 4
-                return true, true
-            end
-        elseif Char == 102 then -- false
-            if Text:sub(Position, Position + 4) == "false" then
-                Position = Position + 5
-                return false, true
-            end
-        elseif Char == 110 then -- null
-            if Text:sub(Position, Position + 3) == "null" then
-                Position = Position + 4
-                return nil, true
-            end
-        end
-
-        return nil, false
-    end
-
-    local Result, Ok = ParseValue()
-    if not Ok then
-        return nil
-    end
-    SkipWhitespace()
-    if Position <= Length then
-        return nil
-    end
-    return Result
-end
+local JsonDecode
 
 local function SameValue(A, B)
     if A == B then
@@ -425,7 +219,9 @@ local function CopyToClipboard(Text)
     return Ok, Err
 end
 
-local function NewConfigSystem(Library, FileManager, Folder)
+local function NewConfigSystem(Library, FileManager, Folder, Safety)
+    JsonDecode=Safety.DecodeJson
+    Folder=Safety.Folder(Folder)
     local ConfigSystem = {}
 
     ConfigSystem.BasePath = Folder .. "/Configs/" .. tostring(game.GameId)
@@ -472,8 +268,7 @@ local function NewConfigSystem(Library, FileManager, Folder)
     end
 
     function ConfigSystem:GetPath(Name)
-        Name = tostring(Name or "Default")
-        assert(#Name > 0 and #Name <= 64 and not Name:find('[<>:"/\\|?*%c]') and Name ~= "." and Name ~= "..", "Invalid config name")
+        Name = Safety.ProfileName(Name or "Default")
         return self.BasePath .. "/" .. Name .. ".cfg"
     end
 
@@ -606,160 +401,111 @@ local function NewConfigSystem(Library, FileManager, Folder)
             Data[Flag] = ModuleData
         end
 
+        for _,record in pairs(Data) do
+            for group,mapName in pairs({Toggles="ToggleMap",Sliders="SliderMap",Dropdowns="DropdownMap",TextBoxes="TextBoxMap",ColorPickers="ColorPickerMap",Keybinds="KeybindMap"}) do
+                for flag in pairs(record[group] or {}) do
+                    local control=Library[mapName] and Library[mapName][flag]
+                    if control and control.IgnoreConfig then record[group][flag]=nil end
+                end
+            end
+        end
         return Data
     end
 
+    -- Preflight every recognized value before flags, callbacks or modules change.
+    function ConfigSystem:Validate(Data)
+        Safety.Map(Data,"Invalid config data")
+        for flag,record in pairs(Data) do
+            if flag~="__VisionStyle" then
+                Safety.Map(record,"Invalid module record")
+                assert(record.Enabled==nil or type(record.Enabled)=="boolean","Invalid enabled state")
+                for group,mapName in pairs({Toggles="ToggleMap",Sliders="SliderMap",Dropdowns="DropdownMap",TextBoxes="TextBoxMap",ColorPickers="ColorPickerMap",Keybinds="KeybindMap"}) do
+                    if record[group]~=nil then
+                        Safety.Map(record[group],"Invalid control group")
+                        for key,value in pairs(record[group]) do
+                            local c=Library[mapName] and Library[mapName][key]
+                            if c and not c.IgnoreConfig then
+                                if group=="ColorPickers" then
+                                    Safety.Map(value,"Invalid color")
+                                    for _,component in ipairs({"R","G","B"}) do assert(Safety.Finite(value[component]) and value[component]>=0 and value[component]<=255,"Invalid color component") end
+                                    value=Color3.fromRGB(value.R,value.G,value.B)
+                                elseif group=="Keybinds" then
+                                    assert(type(value)=="string" and (value=="" or Enum.KeyCode[value]),"Invalid keybind")
+                                    value=value=="" and "None" or value
+                                elseif group=="Sliders" and type(value)=="table" then error("Range slider config is unsupported") end
+                                Safety.ControlValue(c,value)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if Data.__VisionStyle then
+            Safety.Map(Data.__VisionStyle,"Invalid style")
+            Safety.Map(Data.__VisionStyle.values,"Invalid style values")
+            assert(next(Data.__VisionStyle.values)==nil,"Style cannot contain control values")
+        end
+        if self.ValidateStyle then self:ValidateStyle(Data) end
+        return Data
+    end
+    function ConfigSystem:Decode(Raw)
+        local decoded=JsonDecode(self:SanitizeRaw(Raw))
+        Safety.Map(decoded,"Invalid config format")
+        local version=decoded.Version or 1
+        assert(type(version)=="number" and version%1==0 and version>=1 and version<=self.SchemaVersion,"Unsupported config version")
+        local data=decoded.Config or decoded
+        self:Validate(data)
+        return self:Migrate(Safety.Copy(data),version),decoded
+    end
+
     function ConfigSystem:Apply(Data)
-        Data = Data or {}
-
-        for ModuleFlag, Module in pairs(Library.Modules or {}) do
-            local ModuleData = Data[ModuleFlag]
-            if ModuleData and ModuleData.Enabled ~= nil then
-                Module:SetEnabled(ModuleData.Enabled)
-            else
-                Module:SetEnabled(false)
-            end
-        end
-
-        local AppliedToggles = {}
-
-        for ModuleFlag, ModuleData in pairs(Data) do
-            if ModuleData.Toggles then
-                for ToggleFlag, State in pairs(ModuleData.Toggles) do
-                    AppliedToggles[ToggleFlag] = true
-                    Library.Flags[ToggleFlag] = State
-
-                    if Library.ToggleMap and Library.ToggleMap[ToggleFlag] then
-                        Library.ToggleMap[ToggleFlag]:Set(State)
-                    end
-                end
-            end
-
-            if ModuleData.Sliders then
-                for SliderFlag, SliderData in pairs(ModuleData.Sliders) do
-                    if Library.SliderMap and Library.SliderMap[SliderFlag] then
-                        local SliderInstance = Library.SliderMap[SliderFlag]
-                        local CurrentValue, CurrentMinimum = SliderInstance:GetValue()
-
-                        if type(SliderData) == "table" then
-                            if CurrentValue ~= SliderData.Value then
-                                SliderInstance:SetValue(SliderData.Value)
-                            end
-                            if CurrentMinimum ~= SliderData.MinValue then
-                                SliderInstance:SetMinimum(SliderData.MinValue)
-                            end
-                            Library.Flags[SliderFlag] = {Min = SliderData.MinValue, Max = SliderData.Value}
-                        else
-                            if CurrentValue ~= SliderData then
-                                SliderInstance:SetValue(SliderData)
-                            end
-                            Library.Flags[SliderFlag] = SliderData
-                        end
-                    else
-                        Library.Flags[SliderFlag] = type(SliderData) == "table" and {Min = SliderData.MinValue, Max = SliderData.Value} or SliderData
-                    end
-                end
-            end
-
-            if ModuleData.Carousels then
-                for CarouselFlag, Value in pairs(ModuleData.Carousels) do
-                    Library.Flags[CarouselFlag] = Value
-
-                    if Library.CarouselMap and Library.CarouselMap[CarouselFlag] then
-                        local CarouselInstance = Library.CarouselMap[CarouselFlag]
-
-                        if CarouselInstance:GetValue() ~= Value then
-                            for Index, OptionName in ipairs(CarouselInstance.Values) do
-                                if OptionName == Value then
-                                    CarouselInstance:SetValue(Index)
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            if ModuleData.Dropdowns then
-                for DropdownFlag, Value in pairs(ModuleData.Dropdowns) do
-                    if Library.DropdownMap and Library.DropdownMap[DropdownFlag] then
-                        local DropdownInstance = Library.DropdownMap[DropdownFlag]
-
-                        if DropdownInstance.IsMulti then
-                            if not SameValue(DropdownInstance:GetSelected() or {}, Value) then
-                                DropdownInstance:SetSelected(type(Value) == "table" and Value or {})
-                            end
-                        else
-                            if DropdownInstance:GetValue() ~= Value then
-                                DropdownInstance:SetValue(Value)
-                            end
-                        end
-                    else
-                        Library.Flags[DropdownFlag] = Value
-                    end
-                end
-            end
-
-            if ModuleData.ColorPickers then
-                for ColorFlag, Data in pairs(ModuleData.ColorPickers) do
-                    if Library.ColorPickerMap and Library.ColorPickerMap[ColorFlag] then
-                        local Color = Color3.fromRGB(
-                            Data.R or 255,
-                            Data.G or 255,
-                            Data.B or 255
-                        )
-                        local ColorInstance = Library.ColorPickerMap[ColorFlag]
-                        if ColorInstance:GetValue() ~= Color then
-                            ColorInstance:SetValue(Color)
-                        end
-                        Library.Flags[ColorFlag] = Color
-                    end
-                end
-            end
-
-            if ModuleData.TextBoxes then
-                for TextBoxFlag, Value in pairs(ModuleData.TextBoxes) do
-                    if Library.TextBoxMap and Library.TextBoxMap[TextBoxFlag] then
-                        local TextBoxInstance = Library.TextBoxMap[TextBoxFlag]
-                        if TextBoxInstance:GetText() ~= Value then
-                            TextBoxInstance:SetText(Value)
-                        end
-                        Library.Flags[TextBoxFlag] = Value
-                    end
-                end
-            end
-
-            if ModuleData.Keybinds then
-                for KeybindFlag, KeyName in pairs(ModuleData.Keybinds) do
-                    if Library.KeybindMap and Library.KeybindMap[KeybindFlag] then
-                        local KeybindInstance = Library.KeybindMap[KeybindFlag]
-
-                        if KeyName and KeyName ~= "" then
-                            local KeyItem = Enum.KeyCode[KeyName] or Enum.UserInputType[KeyName]
-                            if KeyItem and KeybindInstance:GetKey() ~= KeyItem then
-                                KeybindInstance:SetKey(KeyItem)
-                            end
-                        elseif KeybindInstance:GetKey() ~= nil then
-                            KeybindInstance:SetKey(nil)
+        self:Validate(Data)
+        local pending,oldFlags={},table.clone(Library._FlagValues)
+        for _,record in pairs(Data) do
+            if type(record)=="table" then
+                for group,mapName in pairs({Toggles="ToggleMap",Sliders="SliderMap",Dropdowns="DropdownMap",TextBoxes="TextBoxMap",ColorPickers="ColorPickerMap",Keybinds="KeybindMap"}) do
+                    for flag,value in pairs(record[group] or {}) do
+                        local c=Library[mapName] and Library[mapName][flag]
+                        if c and not c.IgnoreConfig then
+                            if group=="ColorPickers" then value=Color3.fromRGB(value.R,value.G,value.B)
+                            elseif group=="Keybinds" then value=value=="" and "None" or value end
+                            table.insert(pending,{control=c,value=value,previous=c:Get(),flag=flag})
                         end
                     end
                 end
             end
         end
-
-        for ToggleFlag, Toggle in pairs(Library.ToggleMap or {}) do
-            local IsInternalConfigFlag = tostring(ToggleFlag):match("^Configs%.") ~= nil
-            if not AppliedToggles[ToggleFlag] and not IsInternalConfigFlag then
-                Library.Flags[ToggleFlag] = false
-                Toggle:Set(false)
+        local assigned={};for _,entry in ipairs(pending) do assigned[entry.flag]=true end
+        for flag,c in pairs(Library.ToggleMap) do
+            if not assigned[flag] and not c.IgnoreConfig and not tostring(flag):match("^Configs%.") then
+                table.insert(pending,{control=c,value=false,previous=c:Get(),flag=flag})
             end
         end
-
-        if Library.LoadStyle then
-            Library:LoadStyle()
-            Library:SetTheme(Library.CurrentTheme)
-            Library:SetAccent(Library.CurrentAccent)
+        local style=Library.Window:ExportConfig()
+        local wasImporting=Library.Window.Importing;Library.Window.Importing=true
+        local ok,err=pcall(function()
+            for _,entry in ipairs(pending) do entry.control:Set(entry.value,true) end
+            if self.ApplyStyle then self:ApplyStyle(Data) end
+        end)
+        if not ok then
+            local restored,restoreErr=pcall(function()
+                for _,entry in ipairs(pending) do entry.control:Set(entry.previous,true) end
+                Library.Window:ImportConfig(style,true)
+            end)
+            table.clear(Library._FlagValues);for flag,value in pairs(oldFlags) do Library._FlagValues[flag]=value end
+            Library.Window.Importing=wasImporting
+            error(tostring(err)..(restored and "" or "; rollback failed: "..tostring(restoreErr)),0)
         end
+        -- Only committed values reach script callbacks. Module activation is last.
+        for _,entry in ipairs(pending) do
+            if entry.control.Kind~="Keybind" then entry.control:_callback(entry.control:Get()) end
+        end
+        for flag,module in pairs(Library.Modules) do
+            local record=Data[flag]
+            module:SetEnabled(record and record.Enabled==true or false)
+        end
+        Library.Window.Importing=wasImporting
+        return true
     end
 
     function ConfigSystem:Save(Name, Description)
@@ -774,12 +520,8 @@ local function NewConfigSystem(Library, FileManager, Folder)
 
         local Json = JsonEncode(Wrapped)
 
-        -- Skip the disk write entirely when the payload is byte-identical
-        -- to the last one we wrote for this profile.
-        if self.LastWrites[Name] ~= Json then
-            FileManager:WriteFile(Path, Json)
-            self.LastWrites[Name] = Json
-        end
+        Safety.WriteVerified(FileManager,Path,Path:gsub("%.cfg$",".backup.cfg"),Json,function(raw) self:Decode(raw) end)
+        self.LastWrites[Name] = Json
 
         self.CurrentProfile = Name
         self.AutoSaveName = Name
@@ -815,25 +557,20 @@ local function NewConfigSystem(Library, FileManager, Folder)
     function ConfigSystem:Load(Name)
         local Path = self:GetPath(Name)
 
-        if not FileManager:IsFile(Path) then
+        if not FileManager:IsFile(Path) and not FileManager:IsFile(Path:gsub("%.cfg$",".backup.cfg")) then
             return
         end
 
-        local Raw = self:SanitizeRaw(FileManager:ReadFile(Path))
-
-        local Decoded = JsonDecode(Raw)
-        if type(Decoded) ~= "table" then
-            return
+        local ok,Data=pcall(function() return self:Decode(FileManager:ReadFile(Path)) end)
+        self.RecoveredFromBackup=false
+        if not ok then
+            local backup=Path:gsub("%.cfg$",".backup.cfg")
+            if FileManager:IsFile(backup) then
+                local recovered,value=pcall(function() return self:Decode(FileManager:ReadFile(backup)) end)
+                if recovered then Data=value;ok=true;self.RecoveredFromBackup=true end
+            end
         end
-
-        -- New format: { Version, Description, Config = ... }.
-        -- Old format: the config table is the file root itself (v1).
-        local Version = tonumber(Decoded.Version) or 1
-        local Data = Decoded.Config or Decoded
-
-        if Version < self.SchemaVersion then
-            Data = self:Migrate(Data, Version)
-        end
+        assert(ok,Data)
 
         self:Apply(Data)
         self.CurrentProfile = Name
@@ -879,7 +616,7 @@ local function NewConfigSystem(Library, FileManager, Folder)
 
     -- Called on every flag change. Just flips a flag: no threads, no I/O.
     function ConfigSystem:ScheduleSave()
-        self.AutoSaveDirty = true
+        if not Library.Window or not Library.Window.Importing then self.AutoSaveDirty = true end
     end
 
     function ConfigSystem:StartAutoSaveLoop()
@@ -903,7 +640,7 @@ local function NewConfigSystem(Library, FileManager, Folder)
     -- Profiles
     function ConfigSystem:SwitchProfile(Name)
         if Name == nil or Name == "" then return end
-
+        assert(self:Load(Name),"Config not found")
         self:SetAutoLoad(Name)
         self.CurrentProfile = Name
         self.AutoSaveName = Name
@@ -954,22 +691,15 @@ local function NewConfigSystem(Library, FileManager, Folder)
             return false
         end
 
-        local Version = tonumber(Decoded.Version) or 1
-        local Data = Decoded.Config or Decoded
-		if type(Data) ~= "table" then
-			return false
-		end
-
-        if Version < self.SchemaVersion then
-            Data = self:Migrate(Data, Version)
-        end
+        local valid,Data=pcall(function() return self:Decode(Json) end)
+        if not valid then return false end
 
 		local ImportOk = pcall(function()
-			self:Apply(Data)
-
 			local Name = tostring(Decoded.Name or "Imported")
 			Name = Name:gsub("[<>:%\"/\\|%?%*]", "_"):sub(1, 64)
 			if Name == "" then Name = "Imported" end
+            Safety.ProfileName(Name)
+            self:Apply(Data)
 			self:Save(Name, Decoded.Description or "")
 			self:SetAutoLoad(Name)
 
@@ -988,7 +718,7 @@ local function NewConfigSystem(Library, FileManager, Folder)
 
         for _, File in ipairs(Files) do
             local Name = File:match("([^/\\]+)%.cfg$")
-            if Name then
+            if Name and not Name:match("%.backup$") then
                 table.insert(Results, Name)
             end
         end
@@ -1002,6 +732,10 @@ local function NewConfigSystem(Library, FileManager, Folder)
         if FileManager:IsFile(Path) then
             delfile(Path)
         end
+
+        local Backup=Path:gsub("%.cfg$",".backup.cfg")
+        if FileManager:IsFile(Backup) then delfile(Backup) end
+        self.LastWrites[Name]=nil
 
         if self:GetAutoLoad() == Name or self.CurrentProfile == Name then
             local Fallback = self.DefaultAutoSaveName
@@ -1027,10 +761,11 @@ local function NewConfigSystem(Library, FileManager, Folder)
             return
         end
 
-        self.LastAutoLoad = Name
-
+        if Name~="" then Safety.ProfileName(Name) end
         local Path = self:GetAutoLoadPath()
         FileManager:WriteFile(Path, Name)
+        assert(FileManager:ReadFile(Path)==Name,"Autoload write verification failed")
+        self.LastAutoLoad = Name
     end
 
     function ConfigSystem:GetAutoLoad()
@@ -1053,49 +788,22 @@ local function NewConfigSystem(Library, FileManager, Folder)
     Library.CurrentConfig = Auto
     ConfigSystem:StartAutoSaveLoop()
 
-    task.spawn(function()
-            local StableTime = 0
-            local LastModuleCount = 0
-            local LastFlagCount = 0
-            local ReadyDeadline = os.clock() + 10
-
-            while not Library.Destroyed and StableTime < 5 and os.clock() < ReadyDeadline do
-                task.wait(0.1)
-
-                local ModuleCount = 0
-                local FlagCount = 0
-
-                for _ in pairs(Library.Modules or {}) do
-                    ModuleCount += 1
-                end
-
-                for _ in pairs(Library._FlagValues or Library.Flags or {}) do
-                    FlagCount += 1
-                end
-
-                if ModuleCount == LastModuleCount and FlagCount == LastFlagCount and ModuleCount > 0 then
-                    StableTime += 1
-                else
-                    StableTime = 0
-                    LastModuleCount = ModuleCount
-                    LastFlagCount = FlagCount
-                end
-            end
-
-            if Library.Destroyed then return end
-
-            if not ConfigSystem:Load(Auto) then
-                ConfigSystem:Save(Auto)
-            end
-            ConfigSystem.AutoSaveDirty = false
-            ConfigSystem.AutoSaveReady = true
-
-            if Library.LoadStyle then
-                Library:LoadStyle()
-                Library:SetTheme(Library.CurrentTheme)
-                Library:SetAccent(Library.CurrentAccent)
-            end
+    -- Explicit startup barrier. Call after all controls and listeners exist.
+    function ConfigSystem:Ready()
+        if self.AutoSaveReady then return true end
+        local ok,err=pcall(function()
+            if not self:Load(Auto) then self:Save(Auto) end
         end)
+        if not ok then
+            self.AutoSaveEnabled=false
+            self.LastError=tostring(err)
+            if Library.Notify then Library:Notify("Config could not load. Autosave paused") end
+            return false,err
+        end
+        self.AutoSaveDirty=false
+        self.AutoSaveReady=true
+        return true
+    end
 
     return ConfigSystem
 end

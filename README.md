@@ -90,3 +90,12 @@ tooltips and confirmation dialogs. Dynamic scripts can call
 flags and `.cfg` profiles while rendering Vision. See `docs/API.md` and `tests/README.md`.
 The optional `legacy-assets` folder retains the scripts' original game sounds,
 icons and font. It is separate from Vision's embedded Lucide icon pack.
+
+Version 1.3.1 hardens both config formats with strict bounded JSON parsing, full
+preflight validation and verified backup writes. Dynamic profiles apply settings
+before activating modules. Call `Library:InitializeConfig()` once after registering
+all controls and listeners. Failed startup loads pause autosave instead of replacing
+the profile. UI staging failures restore settings before gameplay callbacks run.
+Callbacks are external effects and cannot be rolled back after dispatch. Executor
+file APIs do not provide atomic rename, so sudden process termination is not fully
+atomic. See `tests/README.md` for the config regression suite.

@@ -97,6 +97,7 @@ function Tab:CreateModule(options)
     local section=self:CreateSection({Name=options.Name or "Module",Id=options.Id,Column=options.Column or (#self.Sections%2+1)})
     local module={Section=section,Window=self.Window,Name=options.Name or "Module",Enabled=false,Revision=0}
     module.Switch=section:AddToggle({Name="Enabled",Id=section.Id.."/enabled",Default=false,ToolTip=options.ToolTip,Confirm=options.Confirm})
+    module.Switch.Module=module
     local set=module.Switch.Set
     function module.Switch:Set(value,silent)
         value=value==true

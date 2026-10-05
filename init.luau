@@ -14,7 +14,7 @@ local function load(path)
     cache[path]=result
     return result
 end
-local ctx={Load=load, Library={Version="1.3.0",Name="Vision",Distribution="modular"}}
+local ctx={Load=load, Library={Version="1.3.1",Name="Vision",Distribution="modular"}}
 ctx.Players=game:GetService("Players")
 ctx.UIS=game:GetService("UserInputService")
 ctx.TweenService=game:GetService("TweenService")

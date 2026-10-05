@@ -2,6 +2,7 @@
 return function(ctx)
 local Library, Window, Tab, Section, Control = ctx.Library, ctx.Window, ctx.Tab, ctx.Section, ctx.Control
 local Players, UIS, TweenService, HttpService, RunService = ctx.Players, ctx.UIS, ctx.TweenService, ctx.HttpService, ctx.RunService
+local Safety=ctx.Load("modules/ConfigSafety.luau")
 local h = ctx.Helpers
 local rgb, new, corner, padding, list, point, primary, copy, contains, encodeValue, decodeValue = h.rgb, h.new, h.corner, h.padding, h.list, h.point, h.primary, h.copy, h.contains, h.encodeValue, h.decodeValue
 function Window:ExportConfig()
@@ -26,8 +27,8 @@ local function array(value,message)
     assert(count==#value,message)
 end
 
-function Window:ImportConfig(json,silent)
-    local data=HttpService:JSONDecode(json); assert(type(data)=="table" and data.version==1 and type(data.values)=="table","Invalid config format")
+function Window:ValidateConfig(json)
+    local data=Safety.DecodeJson(json); assert(type(data)=="table" and data.version==1 and type(data.values)=="table" and data.values~=Safety.Null,"Invalid config format")
     -- Validate all control values before committing any change.
     local pending={}
     for id,record in pairs(data.values) do
@@ -42,8 +43,8 @@ function Window:ImportConfig(json,silent)
             elseif c.Kind=="Dropdown" then
                 if c.Multi then array(value,"Invalid multi dropdown"); for _,v in ipairs(value) do assert(contains(c.Options,v),"Invalid option") end else assert(contains(c.Options,value),"Invalid option") end
             elseif c.Kind=="Keybind" then assert(type(value)=="string" and (value=="None" or Enum.KeyCode[value]),"Invalid keybind")
-            elseif c.Kind=="Colorpicker" then assert(typeof(value)=="Color3","Invalid color"); assert(record.alpha==nil or type(record.alpha)=="number" and record.alpha==record.alpha and math.abs(record.alpha)<math.huge,"Invalid alpha")
-            elseif c.Kind=="Textbox" then assert(type(value)=="string" and utf8.len(value)~=nil,"Invalid textbox") end
+            elseif c.Kind=="Colorpicker" then assert(typeof(value)=="Color3","Invalid color"); assert(record.alpha==nil or type(record.alpha)=="number" and record.alpha==record.alpha and record.alpha>=0 and record.alpha<=1,"Invalid alpha")
+            elseif c.Kind=="Textbox" then assert(type(value)=="string" and utf8.len(value)~=nil and utf8.len(value)<=c.MaxLength,"Invalid textbox") end
             table.insert(pending,{c,value,record.alpha})
         end
     end
@@ -80,12 +81,18 @@ function Window:ImportConfig(json,silent)
             for _,field in ipairs({"x","y","order"}) do local n=record[field]; assert(n==nil or type(n)=="number" and n==n and math.abs(n)<math.huge,"Invalid section geometry") end
         end
     end
+    return data,pending,colors,pendingSections
+end
+
+function Window:ImportConfig(json,silent)
+    local data,pending,colors,pendingSections=self:ValidateConfig(json)
+    local snapshot=not self.ConfigRestoring and self:ExportConfig() or nil
     local wasImporting=self.Importing; self.Importing=true
     local ok,err=pcall(function()
         if data.theme then self:SetTheme(data.theme) end
         if next(colors) then self:SetTheme(colors) end
         if data.layout then self:SetLayout(data.layout) end
-        for _,entry in ipairs(pending) do if entry[3]~=nil then entry[1]:SetAlpha(entry[3],true) end; entry[1]:Set(entry[2],silent~=false) end
+        for _,entry in ipairs(pending) do if entry[3]~=nil then entry[1]:SetAlpha(entry[3],true) end; if not entry[1].Module then entry[1]:Set(entry[2],true) end end
         if data.window then self.DesiredSize=Vector2.new(math.max(280,data.window.width),math.max(240,data.window.height)); self.Main.Position=UDim2.fromOffset(data.window.x,data.window.y); self:_layout() end
         for _,entry in ipairs(pendingSections) do
             local section,record=entry.section,entry.record
@@ -95,7 +102,19 @@ function Window:ImportConfig(json,silent)
         end
     end)
     self.Importing=wasImporting
-    if not ok then error(err,0) end
+    if not ok then
+        if snapshot then
+            self.ConfigRestoring=true
+            local restored,restoreErr=pcall(function() self:ImportConfig(snapshot,true) end)
+            self.ConfigRestoring=nil
+            if not restored then err=tostring(err).."; rollback failed: "..tostring(restoreErr) end
+        end
+        error(err,0)
+    end
+    if silent==false then
+        for _,entry in ipairs(pending) do if not entry[1].Module and entry[1].Kind~="Keybind" then entry[1]:_callback(entry[1]:Get()) end end
+    end
+    for _,entry in ipairs(pending) do if entry[1].Module then entry[1]:Set(entry[2],silent~=false) end end
     return true
 end
 local function configName(name)
@@ -121,12 +140,10 @@ function Window:SaveConfig(name)
     local json=self:ExportConfig()
     for part in folder:gmatch("[^/]+") do path=path=="" and part or path.."/"..part; if not isfolder(path) then makefolder(path) end end
     local target=folder.."/"..filename
-    if type(isfile)=="function" and type(readfile)=="function" and isfile(target) then
-        local previous=readfile(target)
-        local valid=pcall(function() local data=HttpService:JSONDecode(previous); assert(type(data)=="table" and data.version==1 and type(data.values)=="table") end)
-        if valid then writefile(folder.."/"..name..".backup.json",previous) end
-    end
-    writefile(target,json); return target
+    assert(type(isfile)=="function" and type(readfile)=="function","Executor readback APIs unavailable")
+    local files={IsFile=function(_,p) return isfile(p) end,ReadFile=function(_,p) return readfile(p) end,WriteFile=function(_,p,v) writefile(p,v) end}
+    Safety.WriteVerified(files,target,folder.."/"..name..".backup.json",json,function(value) self:ValidateConfig(value) end)
+    return target
 end
 
 function Window:LoadConfig(name,silent)
@@ -234,9 +251,9 @@ function Window:CreateConfigManager(options)
     end
     manager.Buttons=section:AddButtons({
         {Name="Save",Callback=function() perform(function() local name=manager.Name:Get(); self:SaveConfig(name); manager:Refresh(name); self:Notify("Config saved") end) end},
-        {Name="Load",Callback=function() perform(function() local name=manager.Selected:Get(); assert(manager.HasConfigs,"Choose a config first"); self:LoadConfig(name); self:Notify("Config loaded") end) end},
+        {Name="Load",Callback=function() perform(function() local name=manager.Selected:Get(); assert(manager.HasConfigs,"Choose a config first"); self:LoadConfig(name,false); self:Notify("Config loaded") end) end},
         {Name="Delete",Callback=function() perform(function() local name=manager.Selected:Get(); assert(manager.HasConfigs,"Choose a config first"); self:DeleteConfig(name); manager:Refresh(); self:Notify("Config deleted") end) end},
-        {Name="Reset",Callback=function() perform(function() self:ResetConfig(); self:Notify("Settings reset") end) end},
+        {Name="Reset",Callback=function() perform(function() self:ResetConfig(false); self:Notify("Settings reset") end) end},
     })
     local settings=self:ConfigureAutosave({Name=options.AutosaveName or "Auto",Debounce=options.Debounce or 1,Enabled=options.Autosave==true})
     manager.Autosave=section:AddToggle({Name="Autosave",Id=id.."/autosave",Default=settings.Enabled,IgnoreConfig=true,Callback=function(value) self:ConfigureAutosave({Name=self.Autosave.Name,Debounce=self.Autosave.Debounce,Enabled=value}); if value then self:_configChanged() end end})

@@ -208,9 +208,18 @@ function Vision.CreateDynamic(options)
         end
         local filesAvailable=type(readfile)=="function" and type(writefile)=="function" and type(isfile)=="function" and type(isfolder)=="function" and type(makefolder)=="function" and type(listfiles)=="function"
         if filesAvailable then
-            lib.ConfigSystem=ctx.Load("modules/DynamicConfig.luau")(lib,ctx.Load("modules/FileManager.luau"),options.ConfigFolder or "Dynamic")
+            lib.ConfigSystem=ctx.Load("modules/DynamicConfig.luau")(lib,ctx.Load("modules/FileManager.luau"),options.ConfigFolder or "Dynamic",ctx.Load("modules/ConfigSafety.luau"))
             local config=lib.ConfigSystem
-            local build,apply=config.Build,config.Apply
+            local build=config.Build
+            function config:ValidateStyle(data)
+                if data.__VisionStyle then window:ValidateConfig(ctx.HttpService:JSONEncode(data.__VisionStyle)) end
+            end
+            function lib:InitializeConfig() return config:Ready() end
+            local configChanged=window._configChanged
+            function window:_configChanged()
+                configChanged(self)
+                if not self.Importing then config:ScheduleSave() end
+            end
             function config:Build()
                 local data=build(self)
                 local style=ctx.HttpService:JSONDecode(window:ExportConfig())
@@ -218,9 +227,8 @@ function Vision.CreateDynamic(options)
                 style.values={}; data.__VisionStyle=style
                 return data
             end
-            function config:Apply(data)
-                apply(self,data)
-                if data and data.__VisionStyle then window:ImportConfig(ctx.HttpService:JSONEncode(data.__VisionStyle),false) end
+            function config:ApplyStyle(data)
+                if data and data.__VisionStyle then window:ImportConfig(ctx.HttpService:JSONEncode(data.__VisionStyle),true) end
             end
         else table.insert(window.Errors,"Config file APIs unavailable") end
         -- After the script has made its tabs, add settings without stealing focus.

@@ -216,3 +216,12 @@ The Settings tab exposes profile save/load/delete/reset, sharing, themes and lay
 Dynamic profile autosave uses the existing dirty-flag loop, not native JSON autosave.
 Ordinary Vision applications keep their existing native JSON config API.
 `legacy-assets` contains the game scripts' existing sound and font resources.
+
+### Dynamic startup readiness
+
+After registering every control and gameplay listener, call
+`Library:InitializeConfig()`. It returns `true` on success or `false, error` on
+startup failure. A failure leaves autosave disabled and records
+`Library.ConfigSystem.LastError`. Repair the profile then retry the readiness
+call and explicitly enable autosave if desired. `RecoveredFromBackup` identifies
+a successful backup load. Profiles retain the existing Version 2 envelope.
