@@ -84,7 +84,7 @@ function Section:AddToggle(options)
         c.Knob=new("Frame",{Size=UDim2.fromOffset(12,12),BorderSizePixel=0},c.Switch); corner(c.Knob,6)
     end
     c.Switch:SetAttribute("NoHover",true)
-    w:_connect(c.Switch.Activated,function() if not c.Disabled then c:Set(not c.Value) end end)
+    w:_connect(c.Switch.Activated,function() if not c.Disabled then c:RequestSet(not c.Value) end end)
     c:Set(options.Default==true,true); return c
 end
 

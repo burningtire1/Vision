@@ -192,3 +192,27 @@ Textbox MaxLength counts UTF-8 code points, not bytes or grapheme clusters. Inva
 A successful call also updates the reset default to its normalized selection. When default is omitted, single dropdowns select the first option and multi dropdowns select an empty array. Multi defaults are copied and deduplicated; aliases are resolved for single dropdown defaults.
 
 Slider readouts use up to 15 significant digits rather than a decimal-place guess based on Step. Fractional steps, fractional lower bounds and suffixes are preserved; very small or large values may use scientific notation.
+
+
+## Modules and Dynamic scripts
+
+`tab:CreateModule({Name="Farm", Id="farm", OnEnabled=start, OnDisabled=stop})`
+creates a native section with a configurable enable switch. It supports
+`SetEnabled`, `GetEnabled`, `Destroy` and the regular section controls.
+`OnUpdate` runs while enabled with `UpdateInterval` seconds between calls.
+
+Configurable controls accept `Condition=function() return true end`, `ToolTip`
+and `Confirm={Title="Confirm", Text="Enable this feature?"}`. Risky toggles show
+a confirmation when clicked. Programmatic Set and config restoration do not
+prompt. Hidden rows retain their value. Tooltips support hover and touch.
+`window:Prompt({Text="Continue?", Callback=function(accepted) end})` is asynchronous.
+
+`Vision.CreateDynamic({ConfigFolder="Dynamic Auto Mine", Title="Dynamic"})`
+returns the Dynamic compatibility API. It renders Vision windows, tabs, sections,
+controls, dialogs and notifications. Dynamic modules keep their existing flag IDs,
+callbacks, per-option multi flags and keybox/module objects. Existing .cfg files,
+AutoLoad.txt and Base64 share codes use the same per-game product folders.
+The Settings tab exposes profile save/load/delete/reset, sharing, themes and layout.
+Dynamic profile autosave uses the existing dirty-flag loop, not native JSON autosave.
+Ordinary Vision applications keep their existing native JSON config API.
+`legacy-assets` contains the game scripts' existing sound and font resources.

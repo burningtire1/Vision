@@ -80,3 +80,13 @@ Version 1.2.0 includes a config manager with Save, Load, Delete, Reset and Refre
 Controls and sections support `:Destroy()`. Hold keybinds release when focus is lost or a bind is changed, disabled or removed. Explicit tab, section and control IDs preserve config identity across display-name changes. Textbox limits count Unicode code points and slider inputs are checked before rows are created.
 
 See docs/API.md for options, backup behavior and examples. Runtime tests were performed through a connected Roblox client with synthetic touch input. Physical handset testing and screenshot-based visual approval are not claimed.
+
+
+## Dynamic compatibility
+
+Version 1.3 adds native module enable switches, conditional controls, hover/touch
+tooltips and confirmation dialogs. Dynamic scripts can call
+`Vision.CreateDynamic({ConfigFolder="Dynamic Auto Mine"})` to keep their existing
+flags and `.cfg` profiles while rendering Vision. See `docs/API.md` and `tests/README.md`.
+The optional `legacy-assets` folder retains the scripts' original game sounds,
+icons and font. It is separate from Vision's embedded Lucide icon pack.

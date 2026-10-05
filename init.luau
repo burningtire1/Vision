@@ -14,7 +14,7 @@ local function load(path)
     cache[path]=result
     return result
 end
-local ctx={Load=load, Library={Version="1.2.0",Name="Vision",Distribution="modular"}}
+local ctx={Load=load, Library={Version="1.3.0",Name="Vision",Distribution="modular"}}
 ctx.Players=game:GetService("Players")
 ctx.UIS=game:GetService("UserInputService")
 ctx.TweenService=game:GetService("TweenService")
@@ -27,7 +27,7 @@ ctx.Control={}; ctx.Control.__index=ctx.Control
 ctx.Helpers=load("modules/Utils.luau")
 ctx.Library.Themes=load("modules/Themes.luau")
 ctx.Assets=load("modules/AssetLoader.luau")(ctx)
-for _,name in ipairs({"Window","Tabs","Sections","Controls","Keybinds","Colorpicker","Text","Search","Notifications","Config"}) do
+for _,name in ipairs({"Window","Tabs","Sections","Controls","Keybinds","Colorpicker","Text","Search","Notifications","Config","Modules","Dynamic"}) do
     local attach=load("modules/"..name..".luau")
     assert(type(attach)=="function","Vision module must return an installer: "..name)
     attach(ctx)
